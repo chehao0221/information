@@ -15,17 +15,33 @@ warnings.filterwarnings("ignore")
 DISCORD_WEBHOOK_URL = os.getenv("NEWS_WEBHOOK_URL", "").strip()
 
 def get_live_news(query):
-    """抓取最新一則新聞，優化連結顯示"""
+    """抓取最新新聞，並過濾掉超過 12 小時的舊聞"""
     try:
         safe_query = urllib.parse.quote(query)
         url = f"https://news.google.com/rss/search?q={safe_query}&hl=zh-TW&gl=TW&ceid=TW:zh-TW"
         feed = feedparser.parse(url)
+        
         if feed.entries:
             entry = feed.entries[0]
+            
+            # --- 時間過濾邏輯 ---
+            # 將新聞發布時間轉為 datetime 物件 (UTC)
+            pub_time = datetime.datetime(*entry.published_parsed[:6])
+            now_time = datetime.datetime.utcnow()
+            
+            # 計算時差（小時）
+            diff_hours = (now_time - pub_time).total_seconds() / 3600
+            
+            # 如果新聞超過 12 小時，視為舊聞不顯示
+            if diff_hours > 12:
+                print(f"跳過舊聞: {entry.title} ({int(diff_hours)}小時前)")
+                return None
+            
             clean_title = entry.title.split(" - ")[0]
             return {"title": clean_title, "link": entry.link}
         return None
-    except:
+    except Exception as e:
+        print(f"新聞抓取失敗: {e}")
         return None
 
 def compute_features(df):
@@ -54,7 +70,7 @@ def run():
     # 1. 發送精美標題
     header_msg = (
         f"🛰️ **AI 投資情報站 - 盤前快訊**\n"
-        f"📅 報告時間：`{now_time}`\n"
+        f"📅 報告時間：`{now_time}` (台北)\n"
         f"━━━━━━━━━━━━━━━━━━"
     )
     requests.post(DISCORD_WEBHOOK_URL, json={"content": header_msg})
@@ -82,10 +98,9 @@ def run():
                     last_features = df_feat[features].iloc[-1:].values
                     pred_val = float(model.predict(last_features)[0])
                     
-                    # 根據預估值決定視覺效果
-                    if pred_val > 0.08: emoji = "💥 **極度看多**" # 大於 8%
-                    elif pred_val > 0.03: emoji = "🔥 **強勢看多**" # 3%-8%
-                    elif pred_val > 0.01: emoji = "🚀 **穩定偏多**" # 1%-3%
+                    if pred_val > 0.08: emoji = "💥 **極度看多**"
+                    elif pred_val > 0.03: emoji = "🔥 **強勢看多**"
+                    elif pred_val > 0.01: emoji = "🚀 **穩定偏多**"
                     elif pred_val > 0: emoji = "📈 **微幅看多**"
                     else: emoji = "☁️ **中性觀望**"
                     
@@ -93,12 +108,11 @@ def run():
                 except:
                     ai_status = "⚠️ 分析異常"
 
-            # 4. 新聞抓取
+            # 4. 新聞抓取 (含 12 小時去重過濾)
             news = get_live_news(sym.split('.')[0])
             curr_price = float(df['Close'].iloc[-1])
 
-            # 5. 訊息格式化 (美化重點標的)
-            # 如果預測漲幅超過 5%，訊息框加粗顯示
+            # 5. 訊息格式化
             is_hot = "⭐️" if pred_val > 0.05 else ""
             
             report = (
@@ -106,19 +120,22 @@ def run():
                 f"💰 現價：`{curr_price:.2f}`\n"
                 f"🤖 AI 預估：{ai_status}\n"
             )
+            
             if news:
                 report += f"📰 頭條：{news['title']}\n🔗 <{news['link']}>\n"
+            else:
+                report += f"ℹ️ 近 12 小時無重大相關新聞\n"
             
             requests.post(DISCORD_WEBHOOK_URL, json={"content": report})
-            print(f"✅ {sym} OK")
+            print(f"✅ {sym} 處理完成")
 
         except Exception as e:
-            print(f"❌ {sym} Err: {e}")
+            print(f"❌ {sym} 錯誤: {e}")
 
     # 結尾聲明
     footer = (
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📌 *對帳提示：本預測為 5 個交易日目標，請於一週後回測勝率。*\n"
+        f"📌 *對帳提示：本預測為 5 個交易日目標，請於一週後回測。*\n"
         f"⚠️ *投資盈虧自負，AI 僅供策略參考。*"
     )
     requests.post(DISCORD_WEBHOOK_URL, json={"content": footer})
