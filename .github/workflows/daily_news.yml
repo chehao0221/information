@@ -20,7 +20,7 @@ jobs:
 
       - name: 3. 安裝 AI 與財經必要套件
         run: |
-          pip install feedparser requests yfinance pandas numpy xgboost
+          pip install feedparser requests yfinance pandas numpy xgboost scikit-learn
 
       - name: 4. 執行 AI 綜合分析發送程式
         env:
