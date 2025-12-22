@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: '30 00 * * 1-5' # 台灣時間 08:30 (台股盤前)
     - cron: '30 13 * * 1-5' # 台灣時間 21:30 (美股盤前)
-  workflow_dispatch:
+  workflow_dispatch: # 允許手動執行
 
 jobs:
   send_news:
@@ -18,10 +18,12 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: 3. 安裝必要套件
-        run: pip install feedparser requests
+      - name: 3. 安裝 AI 與財經必要套件
+        run: |
+          pip install feedparser requests yfinance pandas numpy xgboost
 
-      - name: 4. 執行發送程式
+      - name: 4. 執行 AI 綜合分析發送程式
         env:
+          # 這裡確保對應您之前的 Secret 名稱
           NEWS_WEBHOOK_URL: ${{ secrets.NEWS_WEBHOOK_URL }}
         run: python news_us_tw.py
