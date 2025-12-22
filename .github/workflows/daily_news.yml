@@ -2,19 +2,18 @@ name: Stock News Notification
 
 on:
   schedule:
-    # 這裡設定兩次執行時間 (UTC 時間)
-    - cron: '30 00 * * 1-5' # 台灣時間 08:30 (台股盤前)
-    - cron: '30 13 * * 1-5' # 台灣時間 21:30 (美股盤前)
-  workflow_dispatch: # 讓你可以點擊按鈕手動測試
+    - cron: '30 00 * * 1-5' # 台灣時間 08:30 (台股開盤前)
+    - cron: '30 13 * * 1-5' # 台灣時間 21:30 (美股開盤前)
+  workflow_dispatch: # 支援手動點擊執行測試
 
 jobs:
   send_news:
     runs-on: ubuntu-latest
     steps:
-      - name: 檢核程式碼
+      - name: 檢查程式碼
         uses: actions/checkout@v3
 
-      - name: 設定 Python 環境
+      - name: 設定 Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
@@ -23,8 +22,7 @@ jobs:
         run: |
           pip install feedparser requests
 
-      - name: 執行消息面抓取與發送
+      - name: 執行消息面抓取
         env:
-          # 這裡會讀取你在 GitHub Secrets 設定的 Webhook 網址
           NEWS_WEBHOOK_URL: ${{ secrets.NEWS_WEBHOOK_URL }}
         run: python news_us_tw.py
