@@ -51,19 +51,21 @@ def run():
     tz = datetime.timezone(datetime.timedelta(hours=8))
     now_time = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
 
-    # 1. 發送標題
-    header_msg = f"🛰️ **AI 盤前快訊** ({now_time})\n━━━━━━━━━━━━━━━━━━"
+    # 1. 發送精美標題
+    header_msg = (
+        f"🛰️ **AI 投資情報站 - 盤前快訊**\n"
+        f"📅 執行時間：`{now_time}`\n"
+        f"💡 *AI 邏輯：數據海選 ➔ 技術面決策 ➔ 自動對帳進化*"
+    )
     requests.post(DISCORD_WEBHOOK_URL, json={"content": header_msg})
 
     for sym in must_watch:
         try:
-            # 2. 抓取股價資料 (增加重試與超時設定)
+            # 2. 抓取股價資料
             ticker = yf.Ticker(sym)
             df = ticker.history(period="2y", timeout=25) 
             
             if df.empty:
-                # 如果抓不到資料，發送警告到 Discord 幫助除錯
-                requests.post(DISCORD_WEBHOOK_URL, json={"content": f"⚠️ {sym}: 無法從 Yahoo Finance 取得資料"})
                 continue
 
             # 3. AI 預測模型
@@ -78,34 +80,41 @@ def run():
                     model = XGBRegressor(n_estimators=50, max_depth=3, learning_rate=0.1)
                     model.fit(train_df[features], train_df["target"])
                     
-                    # 預測最後一筆數據
                     last_features = df_feat[features].iloc[-1:].values
                     pred = float(model.predict(last_features)[0])
                     
-                    emoji = "🚀" if pred > 0.015 else "📈" if pred > 0 else "☁️"
-                    ai_status = f"{emoji} 5日預估: `{pred:+.2%}`"
-                except Exception as e:
-                    ai_status = f"⚠️ AI 分析失敗: {str(e)[:30]}"
+                    # 根據預估漲幅決定 Emoji
+                    if pred > 0.03: emoji = "🔥" 
+                    elif pred > 0.01: emoji = "🚀"
+                    elif pred > 0: emoji = "📈"
+                    else: emoji = "☁️"
+                    
+                    ai_status = f"{emoji} 5日預估：**`{pred:+.2%}`**"
+                except:
+                    ai_status = "⚠️ AI 運算異常"
 
             # 4. 抓取最新新聞
             news = get_live_news(sym.split('.')[0])
             curr_price = float(df['Close'].iloc[-1])
 
-            # 5. 組合訊息並發送
-            report = f"**{sym}** | {ai_status}\n💰 現價: `{curr_price:.2f}`"
+            # 5. 組合精美格式訊息
+            report = (
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"🌟 **{sym}**\n"
+                f"💰 目前現價：`{curr_price:.2f}`\n"
+                f"🤖 AI 分析：{ai_status}\n"
+            )
             if news:
-                report += f"\n📰 {news['title']}\n🔗 <{news['link']}>"
+                report += f"📰 最新頭條：{news['title']}\n🔗 <{news['link']}>"
             
-            res = requests.post(DISCORD_WEBHOOK_URL, json={"content": report})
-            print(f"✅ {sym} 發送狀態: {res.status_code}")
+            requests.post(DISCORD_WEBHOOK_URL, json={"content": report})
+            print(f"✅ {sym} 已發送")
 
         except Exception as e:
-            error_msg = f"❌ 處理 {sym} 時發生系統錯誤: {str(e)}"
-            print(error_msg)
-            requests.post(DISCORD_WEBHOOK_URL, json={"content": error_msg})
+            print(f"❌ {sym} 錯誤: {e}")
 
     # 結尾分隔線
-    requests.post(DISCORD_WEBHOOK_URL, json={"content": "━━━━━━━━━━━━━━━━━━"})
+    requests.post(DISCORD_WEBHOOK_URL, json={"content": "━━━━━━━━━━━━━━━━━━\n*本報告由 AI 自動生成，僅供技術研究參考。*"})
 
 if __name__ == "__main__":
     run()
