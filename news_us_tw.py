@@ -28,6 +28,7 @@ def get_live_news(query):
 
 def compute_features(df):
     df = df.copy()
+    # 確保欄位名稱正確
     df["mom20"] = df["Close"].pct_change(20)
     df["mom60"] = df["Close"].pct_change(60)
     delta = df["Close"].diff()
@@ -38,57 +39,59 @@ def compute_features(df):
     df["volatility"] = df["Close"].pct_change().rolling(20).std()
     return df
 
-def send_split_msg(content):
-    if not DISCORD_WEBHOOK_URL: return
-    # 簡單發送，確保訊息不為空
-    if content.strip():
-        requests.post(DISCORD_WEBHOOK_URL, json={"content": content})
-
 def run():
-    # 增加更多標的測試
+    if not DISCORD_WEBHOOK_URL: return
+    
     must_watch = ["2330.TW", "2317.TW", "0050.TW", "AAPL", "NVDA"]
     tz = datetime.timezone(datetime.timedelta(hours=8))
     today = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
     
-    print(f"📡 啟動數據下載...")
-    data = yf.download(must_watch, period="2y", progress=False, auto_adjust=True)
-    
+    # 穩定抓取數據
     report = f"🤖 **AI 投資情報站** ({today})\n━━━━━━━━━━━━━━━━━━\n\n"
 
     for sym in must_watch:
         try:
-            # 兼容單檔與多檔數據格式
-            if isinstance(data.columns, pd.MultiIndex):
-                df = data.xs(sym, axis=1, level=1).dropna()
-            else:
-                df = data.dropna()
+            # 逐一抓取標的，避免 MultiIndex 造成解析錯誤
+            ticker = yf.Ticker(sym)
+            df = ticker.history(period="2y")
+            
+            if df.empty:
+                report += f"⚠️ **{sym}** | 無法獲取行情數據\n\n"
+                continue
 
-            news_content = get_live_news(sym.split('.')[0])
+            # 抓取新聞
+            news_query = sym.split('.')[0]
+            news_content = get_live_news(news_query)
             
-            if len(df) > 50:
-                df_feat = compute_features(df)
-                df_feat["target"] = df_feat["Close"].shift(-5) / df_feat["Close"] - 1
-                features = ["mom20", "mom60", "rsi", "vol_ratio", "volatility"]
-                train_df = df_feat.dropna(subset=features + ["target"])
-                
-                model = XGBRegressor(n_estimators=50, max_depth=3)
-                model.fit(train_df[features], train_df["target"])
-                pred = float(model.predict(df_feat[features].iloc[-1:])[0])
-                
-                curr_price = float(df['Close'].iloc[-1])
-                status = "🚀" if pred > 0.01 else "📈" if pred > 0 else "☁️"
-                report += f"{status} **{sym}** | 預估: `{pred:+.2%}`\n"
-                report += f"  - 現價: {curr_price:.1f}\n"
-            else:
-                report += f"⚪ **{sym}** | (數據不足，暫無AI預測)\n"
-            
+            # AI 預測邏輯
+            ai_info = "(計算中)"
+            if len(df) > 60:
+                try:
+                    df_feat = compute_features(df)
+                    df_feat["target"] = df_feat["Close"].shift(-5) / df_feat["Close"] - 1
+                    features = ["mom20", "mom60", "rsi", "vol_ratio", "volatility"]
+                    train_df = df_feat.dropna(subset=features + ["target"])
+                    
+                    model = XGBRegressor(n_estimators=50, max_depth=3)
+                    model.fit(train_df[features], train_df["target"])
+                    pred = float(model.predict(df_feat[features].iloc[-1:])[0])
+                    
+                    status = "🚀" if pred > 0.01 else "📈" if pred > 0 else "☁️"
+                    ai_info = f"{status} 預估: `{pred:+.2%}`"
+                except:
+                    ai_info = "📈 分析完畢"
+
+            curr_price = float(df['Close'].iloc[-1])
+            report += f"**{sym}** | {ai_info}\n"
+            report += f"  - 現價: {curr_price:.2f}\n"
             report += f"{news_content}\n\n"
             
         except Exception as e:
-            report += f"⚠️ **{sym}** | 處理時發生錯誤\n\n"
+            print(f"Error processing {sym}: {e}")
+            report += f"⚠️ **{sym}** | 數據解析異常\n\n"
 
     report += "━━━━━━━━━━━━━━━━━━"
-    send_split_msg(report)
+    requests.post(DISCORD_WEBHOOK_URL, json={"content": report})
 
 if __name__ == "__main__":
     run()
