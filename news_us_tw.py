@@ -11,30 +11,42 @@ def get_news(query, lang='zh-TW', region='TW'):
     safe_query = urllib.parse.quote(query)
     url = f"https://news.google.com/rss/search?q={safe_query}&hl={lang}&gl={region}&ceid={region}:{lang}"
     feed = feedparser.parse(url)
-    return [{"title": entry.title, "link": entry.link} for entry in feed.entries[:3]] if feed.entries else []
+    # 限制只取前 2 則，確保訊息不會過長被 Discord 阻擋
+    return [{"title": entry.title, "link": entry.link} for entry in feed.entries[:2]] if feed.entries else []
 
 def run():
     if not WEBHOOK:
-        print("❌ 錯誤：完全抓不到 NEWS_WEBHOOK_URL。")
+        print("❌ 錯誤：找不到 NEWS_WEBHOOK_URL")
         return
 
-    # 先發送一個簡單的測試訊息，確認 Webhook 本身是通的
-    test_res = requests.post(WEBHOOK, json={"content": "🚀 機器人連線測試：如果您看到這則訊息，代表 Webhook 設定正確！"})
-    
-    tw_targets = {"台股大盤": "台股 走勢", "晶圓代工": "台積電 2330"}
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    msg = f"🗞️ **台美股焦點消息面報** ({now})\n"
+    # 定義關鍵追蹤標的
+    tw_targets = {"📈 台股大盤": "台股 走勢", "晶圓代工": "台積電 2330"}
+    us_targets = {"🦅 聯準會趨勢": "Fed CPI", "💻 美股科技": "NVIDIA Apple"}
 
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    msg = f"🗞️ **台美股盤前情報** ({now})\n━━━━━━━━━━━━━━━━━━\n"
+
+    # 台股摘要
     for label, query in tw_targets.items():
         news = get_news(query)
-        msg += f"**【{label}】**\n"
+        msg += f"**{label}**\n"
         for n in news:
-            msg += f"🔹 {n['title']}\n  <{n['link']}>\n"
+            msg += f"🔹 {n['title']}\n<{n['link']}>\n"
+    
+    msg += "\n"
+
+    # 美股摘要
+    for label, query in us_targets.items():
+        news = get_news(query, lang='zh-TW', region='US')
+        msg += f"**{label}**\n"
+        for n in news:
+            msg += f"🔸 {n['title']}\n<{n['link']}>\n"
+
+    msg += "━━━━━━━━━━━━━━━━━━\n💡 *AI 自動彙整，投資請獨立評估。*"
 
     # 發送正式新聞
-    res = requests.post(WEBHOOK, json={"content": msg})
-    print(f"📡 測試訊息狀態: {test_res.status_code}")
-    print(f"📡 新聞訊息狀態: {res.status_code}")
+    res = requests.post(WEBHOOK, json={"content": msg}, timeout=15)
+    print(f"📡 最終發送狀態: {res.status_code}")
 
 if __name__ == "__main__":
     run()
