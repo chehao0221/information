@@ -1,0 +1,19 @@
+name: Stock News Notification
+
+on:
+  schedule:
+    - cron: '30 00 * * 1-5' # UTC 00:30 = 台灣時間 08:30
+  workflow_dispatch: # 支援手動觸發
+
+jobs:
+  send_news:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - run: pip install feedparser requests
+      - env:
+          NEWS_WEBHOOK_URL: ${{ secrets.NEWS_WEBHOOK_URL }}
+        run: python news_us_tw.py
