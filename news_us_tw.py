@@ -1,13 +1,16 @@
 import feedparser
 import requests
 import os
+import urllib.parse
 from datetime import datetime
 
-# 讀取並自動清理網址可能的空白或換行
+# 讀取 Secret
 WEBHOOK = os.environ.get("NEWS_WEBHOOK_URL", "").strip()
 
 def get_news(query, lang='zh-TW', region='TW'):
-    url = f"https://news.google.com/rss/search?q={query}&hl={lang}&gl={region}&ceid={region}:{lang}"
+    # 加入 quote 轉碼，解決 InvalidURL 錯誤
+    safe_query = urllib.parse.quote(query)
+    url = f"https://news.google.com/rss/search?q={safe_query}&hl={lang}&gl={region}&ceid={region}:{lang}"
     feed = feedparser.parse(url)
     return [{"title": entry.title, "link": entry.link} for entry in feed.entries[:3]] if feed.entries else []
 
@@ -16,28 +19,40 @@ def run():
         print("❌ 錯誤：找不到 NEWS_WEBHOOK_URL，請檢查 Secrets 設定。")
         return
 
-    # 定義標的
-    targets = {
-        "📈 台美股焦點": "台股 走勢 NVIDIA Apple",
-        "🦅 總經動態": "Federal Reserve Fed CPI"
-    }
+    # 定義追蹤標的
+    tw_targets = {"台股大盤": "台股 走勢", "晶圓代工": "台積電 2330", "AI 伺服器": "鴻海 廣達"}
+    us_targets = {"聯準會趨勢": "Federal Reserve Fed CPI", "美股科技": "NVIDIA Apple AI stock", "熱門個股": "TSLA Tesla stock"}
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    msg = f"🗞️ **盤前消息面報** ({now})\n━━━━━━━━━━━━━━━━━━\n"
+    msg = f"🗞️ **台美股焦點消息面報**\n更新時間: {now} (TW)\n━━━━━━━━━━━━━━━━━━\n"
 
-    for label, query in targets.items():
+    # 彙整台股
+    msg += "🇹🇼 **台股盤前焦點**\n"
+    for label, query in tw_targets.items():
         news = get_news(query)
         msg += f"**【{label}】**\n"
         for n in news:
             msg += f"🔹 {n['title']}\n  <{n['link']}>\n"
+    
+    # 彙整美股
+    msg += "\n🇺🇸 **美股重要趨勢**\n"
+    for label, query in us_targets.items():
+        news = get_news(query, lang='zh-TW', region='US')
+        msg += f"**【{label}】**\n"
+        for n in news:
+            msg += f"🔸 {n['title']}\n  <{n['link']}>\n"
 
-    msg += "━━━━━━━━━━━━━━━━━━\n💡 *AI 自動彙整，僅供參考。*"
+    msg += "━━━━━━━━━━━━━━━━━━\n💡 *本內容由 AI 彙整，僅供投資參考。*"
 
-    # 發送並強制回報結果
-    res = requests.post(WEBHOOK, json={"content": msg})
-    print(f"📡 發送狀態: {res.status_code}")
-    if res.status_code not in [200, 204]:
-        print(f"❌ 錯誤內容: {res.text}")
+    # 發送至 Discord
+    try:
+        res = requests.post(WEBHOOK, json={"content": msg}, timeout=15)
+        if res.status_code in [200, 204]:
+            print(f"✅ 報表已於 {now} 成功發送")
+        else:
+            print(f"❌ Discord 傳送失敗，狀態碼: {res.status_code}")
+    except Exception as e:
+        print(f"❌ 發生異常: {e}")
 
 if __name__ == "__main__":
     run()
