@@ -18,12 +18,11 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: 3. 安裝 AI 與財經必要套件
+      - name: 3. 安裝必要套件 (已移除 AI 套件)
         run: |
-          pip install feedparser requests yfinance pandas numpy xgboost scikit-learn
+          pip install feedparser requests yfinance
 
-      - name: 4. 執行 AI 綜合分析發送程式
+      - name: 4. 執行即時消息發送程式
         env:
-          # 這裡確保對應您之前的 Secret 名稱
           NEWS_WEBHOOK_URL: ${{ secrets.NEWS_WEBHOOK_URL }}
         run: python news_us_tw.py
