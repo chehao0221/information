@@ -2,27 +2,26 @@ name: Stock News Notification
 
 on:
   schedule:
-    - cron: '30 00 * * 1-5' # 台灣時間 08:30
-    - cron: '30 13 * * 1-5' # 台灣時間 21:30
+    - cron: '30 00 * * 1-5' # 台灣時間 08:30 (台股盤前)
+    - cron: '30 13 * * 1-5' # 台灣時間 21:30 (美股盤前)
   workflow_dispatch:
 
 jobs:
   send_news:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: 1. 檢核程式碼
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: 2. 設定 Python 環境
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      - name: Install Dependencies
-        run: |
-          pip install feedparser requests
+      - name: 3. 安裝必要套件
+        run: pip install feedparser requests
 
-      - name: Run Script
+      - name: 4. 執行發送程式
         env:
           NEWS_WEBHOOK_URL: ${{ secrets.NEWS_WEBHOOK_URL }}
         run: python news_us_tw.py
