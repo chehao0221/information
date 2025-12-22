@@ -1,5 +1,6 @@
 import yfinance as yf
 import pandas as pd
+import numpy as np
 import requests
 import datetime
 import os
@@ -10,7 +11,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-# 強制清理 Webhook 網址中的空格或特殊字元
+# 讀取 Webhook 網址並清理空格
 DISCORD_WEBHOOK_URL = os.getenv("NEWS_WEBHOOK_URL", "").strip()
 
 def get_live_news(query):
@@ -38,16 +39,26 @@ def compute_features(df):
     df["volatility"] = df["Close"].pct_change().rolling(20).std()
     return df
 
+def send_to_discord(text):
+    """安全發送訊息函數"""
+    if DISCORD_WEBHOOK_URL and text.strip():
+        res = requests.post(DISCORD_WEBHOOK_URL, json={"content": text}, timeout=15)
+        print(f"📡 Discord 回傳狀態: {res.status_code}")
+        if res.status_code >= 400:
+            print(f"❌ 錯誤原因: {res.text}")
+
 def run():
     if not DISCORD_WEBHOOK_URL:
-        print("❌ 錯誤：找不到 NEWS_WEBHOOK_URL")
+        print("❌ 錯誤：找不到 Webhook URL")
         return
     
     must_watch = ["2330.TW", "2317.TW", "0050.TW", "AAPL", "NVDA"]
     tz = datetime.timezone(datetime.timedelta(hours=8))
     today = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
     
-    report = f"🤖 **AI 投資情報站** ({today})\n━━━━━━━━━━━━━━━━━━\n\n"
+    # 發送標題
+    header = f"🤖 **AI 投資情報站** ({today})\n━━━━━━━━━━━━━━━━━━"
+    send_to_discord(header)
 
     for sym in must_watch:
         try:
@@ -55,10 +66,8 @@ def run():
             df = ticker.history(period="2y")
             if df.empty: continue
 
-            news_query = sym.split('.')[0]
-            news_content = get_live_news(news_query)
+            # AI 預測
             ai_info = "📈 分析中"
-            
             if len(df) > 60:
                 try:
                     df_feat = compute_features(df)
@@ -70,21 +79,19 @@ def run():
                     pred = float(model.predict(df_feat[features].iloc[-1:])[0])
                     status = "🚀" if pred > 0.01 else "📈" if pred > 0 else "☁️"
                     ai_info = f"{status} 5日預估: `{pred:+.2%}`"
-                except:
-                    pass
+                except: pass
 
             curr_price = float(df['Close'].iloc[-1])
-            report += f"**{sym}** | {ai_info}\n  - 現價: {curr_price:.2f}\n{news_content}\n\n"
+            news_content = get_live_news(sym.split('.')[0])
+            
+            # 每個標的一則訊息，確保不爆字數
+            item_msg = f"**{sym}** | {ai_info}\n  - 現價: {curr_price:.2f}\n{news_content}"
+            send_to_discord(item_msg)
+            
         except Exception as e:
-            print(f"Error on {sym}: {e}")
+            print(f"跳過 {sym}: {e}")
 
-    report += "━━━━━━━━━━━━━━━━━━"
-    
-    # 嚴格發送並列印狀態
-    response = requests.post(DISCORD_WEBHOOK_URL, json={"content": report})
-    print(f"📡 Discord 回傳狀態碼: {response.status_code}")
-    if response.status_code != 204:
-        print(f"❌ 發送失敗，原因: {response.text}")
+    send_to_discord("━━━━━━━━━━━━━━━━━━")
 
 if __name__ == "__main__":
     run()
