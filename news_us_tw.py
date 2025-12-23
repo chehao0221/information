@@ -7,102 +7,95 @@ import urllib.parse
 import warnings
 
 warnings.filterwarnings("ignore")
-
-# 從 GitHub Secrets 讀取 Webhook URL
 DISCORD_WEBHOOK_URL = os.getenv("NEWS_WEBHOOK_URL", "").strip()
 
 def get_live_news(query):
-    """
-    抓取 Google News 並過濾掉超過 12 小時的舊聞 (方案 A)
-    """
+    """方案 A：自動抓取並過濾 12 小時內的最新消息"""
     try:
         safe_query = urllib.parse.quote(query)
         url = f"https://news.google.com/rss/search?q={safe_query}&hl=zh-TW&gl=TW&ceid=TW:zh-TW"
         feed = feedparser.parse(url)
-        
         if feed.entries:
             entry = feed.entries[0]
-            # 取得新聞發布時間 (UTC)
             pub_time = datetime.datetime(*entry.published_parsed[:6])
             now_time = datetime.datetime.utcnow()
-            
-            # 計算時間差 (小時)
-            diff_hours = (now_time - pub_time).total_seconds() / 3600
-            
-            # 方案 A 核心：如果新聞超過 12 小時，視為「舊聞」不回傳
-            if diff_hours > 12:
+            if (now_time - pub_time).total_seconds() / 3600 > 12:
                 return None
-                
             return {
                 "title": entry.title.split(" - ")[0], 
                 "link": entry.link,
-                "time": (pub_time + datetime.timedelta(hours=8)).strftime("%m/%d %H:%M") # 轉台北時間
+                "time": (pub_time + datetime.timedelta(hours=8)).strftime("%H:%M")
             }
         return None
-    except:
-        return None
-
-def send_to_discord(embed):
-    """發送 Embed 格式到 Discord"""
-    payload = {"embeds": [embed]}
-    requests.post(DISCORD_WEBHOOK_URL, json=payload)
+    except: return None
 
 def run():
-    if not DISCORD_WEBHOOK_URL:
-        print("錯誤: 找不到 NEWS_WEBHOOK_URL 設定")
-        return
-
-    # 監控清單
-    must_watch = ["2330.TW", "2317.TW", "0050.TW", "AAPL", "NVDA", "TSLA", "QQQ", "SOXL"]
+    if not DISCORD_WEBHOOK_URL: return
     
     tz = datetime.timezone(datetime.timedelta(hours=8))
-    now_str = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M")
+    now = datetime.datetime.now(tz)
+    current_hour = now.hour
 
-    # 1. 發送總體標頭
+    # --- 💡 雙市場流行清單設定 ---
+    if current_hour < 12:
+        market_title = "🏹 台股開盤前瞻 | Morning Brief"
+        # 標籤化：讓您一眼看出標的屬性
+        watch_list = {
+            "2330.TW": "護國神山/AI晶片", 
+            "2317.TW": "鴻海/AI伺服器", 
+            "2382.TW": "廣達/筆電代工", 
+            "2454.TW": "聯發科/IC設計", 
+            "0050.TW": "台股大盤權值", 
+            "00878.TW": "高股息熱門指標"
+        }
+    else:
+        market_title = "⚡ 美股即時戰報 | US Market Radar"
+        watch_list = {
+            "NVDA": "AI 晶片霸主", 
+            "TSLA": "特斯拉/自動駕駛", 
+            "AAPL": "蘋果/消費電子", 
+            "MSTR": "比特幣巨鯨概念", 
+            "SOXL": "半導體3倍看多", 
+            "QQQ": "納斯達克指標"
+        }
+
+    # 1. 發送結構化標頭
     requests.post(DISCORD_WEBHOOK_URL, json={
-        "content": f"📊 **市場即時情報** | `{now_str}` (台北)\n━━━━━━━━━━━━━━━━━━"
+        "content": f"### {market_title}\n📅 `{now.strftime('%Y-%m-%d %H:%M')}`\n" + "━"*15
     })
 
-    for sym in must_watch:
+    for sym, label in watch_list.items():
         try:
-            # 抓取最近 5 天資料確保有足夠 K 線計算漲跌
             ticker = yf.Ticker(sym)
+            # 使用 5d 確保跨週末也能抓到資料
             df = ticker.history(period="5d")
             if df.empty or len(df) < 2: continue
             
-            curr_price = df['Close'].iloc[-1]
-            prev_price = df['Close'].iloc[-2]
-            change = curr_price - prev_price
-            change_pct = (change / prev_price) * 100
+            curr_p, prev_p = df['Close'].iloc[-1], df['Close'].iloc[-2]
+            change_pct = ((curr_p - prev_p) / prev_p) * 100
             
-            # 顏色與符號判定
-            color = 0xFF0000 if change > 0 else 0x00FF00 if change < 0 else 0x808080
-            direction = "🔺" if change > 0 else "🔻" if change < 0 else "➖"
+            # 2. 流行視覺：根據漲跌幅強度顯示狀態
+            if change_pct > 1.5:
+                status, color = "🔥 強勢", 0xFF4500 # 橘紅
+            elif change_pct < -1.5:
+                status, color = "❄️ 弱勢", 0x1E90FF # 閃亮藍
+            else:
+                status, color = "⚖️ 平穩", 0x95A5A6 # 質感灰
 
-            # 取得過濾後的新聞
             news = get_live_news(sym.split('.')[0])
             
+            # 3. 構建專業 Embed 訊息
             embed = {
-                "title": f"📈 {sym} 盤勢快訊",
+                "title": f"{sym} | {label}",
+                "description": f"市場表現：**{status}**",
                 "color": color,
                 "fields": [
-                    {
-                        "name": "💰 即時現價",
-                        "value": f"**{curr_price:.2f}** ({direction} `{change_pct:+.2f}%`)",
-                        "inline": True
-                    },
-                    {
-                        "name": "📰 關鍵頭條",
-                        "value": f"[{news['title']}]({news['link']})\n*(發布時間: {news['time']})*" if news else "近 12 小時暫無重大消息",
-                        "inline": False
-                    }
+                    {"name": "💵 當前報價", "value": f"`{curr_p:.2f}` (`{change_pct:+.2f}%`)", "inline": True},
+                    {"name": "🗞️ 焦點頭條", "value": f"[{news['title']}]({news['link']}) \n*(🕒 來源發布時間: {news['time']})*" if news else "🧊 近 12 小時暫無突發重磅消息", "inline": False}
                 ],
-                "footer": {"text": "數據源: Yahoo Finance | Google News"}
+                "footer": {"text": "Quant Bot Intelligence System"}
             }
-            send_to_discord(embed)
+            requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
+        except: continue
 
-        except Exception as e:
-            print(f"處理 {sym} 時發生錯誤: {e}")
-
-if __name__ == "__main__":
-    run()
+if __name__ == "__main__": run()
