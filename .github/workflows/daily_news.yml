@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: '30 00 * * 1-5' # 台灣時間 08:30 (台股盤前)
     - cron: '30 13 * * 1-5' # 台灣時間 21:30 (美股盤前)
-  workflow_dispatch: # 允許手動執行
+  workflow_dispatch: 
 
 jobs:
   send_news:
@@ -16,9 +16,9 @@ jobs:
       - name: 2. 設定 Python 環境
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.10' # 修正：升級到 3.10 以支援最新 yfinance
 
-      - name: 3. 安裝必要套件 (已移除 AI 套件)
+      - name: 3. 安裝必要套件
         run: |
           pip install feedparser requests yfinance
 
