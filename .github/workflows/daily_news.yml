@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: '30 00 * * 1-5' # 台北 08:30 (台股開盤前)
     - cron: '30 07 * * 1-5' # 台北 15:30 (台股盤後)
-    - cron: '30 13 * * 1-5' # 台北 21:30 (美股開盤前) 🔥 新增
+    - cron: '30 13 * * 1-5' # 台北 21:30 (美股開盤前)
     - cron: '00 22 * * 1-5' # 台北 06:00 (美股盤後)
   workflow_dispatch: 
 
@@ -12,7 +12,7 @@ jobs:
   send_news:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 必須開啟寫入權限才能存快取
+      contents: write # 確保能存回快取以實現去重
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,11 +20,11 @@ jobs:
           python-version: '3.10'
       - name: Install
         run: pip install feedparser requests yfinance
-      - name: Run News Script
+      - name: Run Script
         env:
           NEWS_WEBHOOK_URL: ${{ secrets.NEWS_WEBHOOK_URL }}
         run: python news_us_tw.py
-      - name: Save Cache
+      - name: Update Cache
         run: |
           git config --local user.name "News-Bot"
           git config --local user.email "actions@github.com"
