@@ -1,50 +1,35 @@
-📰 Daily Market News AI (台美股每日新聞摘要)
-本專案利用 Python 爬蟲技術，每日定時從 Yahoo Finance 抓取台股與美股的最新財經新聞。結合 GitHub Actions 自動化排程，將海量的市場資訊過濾並整理成精簡的摘要報告，直接推播至你的 Discord 頻道。
+🏹 全球金融快訊雷達系統 (Smart News Radar)
+本系統是一個基於 GitHub Actions 與 Python 驅動的自動化金融情報中心。系統具備「跨市場監控」、「新聞去重快取」以及「關鍵時段推播」三大核心功能，旨在為投資者提供最即時、精確且不重複的台美股市場動態。
 
-🌟 核心功能
-跨市場追蹤：同時監控美股（如 AAPL, NVDA）與台股（如 2330.TW, 2317.TW）的主要標的新聞。
+🌟 核心特性 (Core Features)
+完全解耦設計：獨立於 AI 預測倉庫運行，專注於市場總體經濟與大盤消息，確保單一節點故障不會影響整體運作。
+智能去重機制 (De-duplication)：內建持久化快取技術，自動記錄已推播的新聞標題，確保 Discord 頻道不會出現重複訊息。
+動態時段偵測：系統會自動根據台北時間判斷當前市場（台股或美股），並動態調整搜尋關鍵字。
+盤前預報功能：特別強化「台股開盤前」與「美股開盤前」的情報彙整，助您掌握第一手盤勢脈動。
 
-多來源整合：自動解析 Yahoo Finance 提供的各類財經新聞標題與連結。
+⏳ 自動化執行時間線 (Workflow Timeline)
+系統透過 GitHub Actions 每日於關鍵金融時刻自動執行：
 
-全自動排程：每日固定時間自動運行，無需手動啟動腳本。
+台北時間 (GMT+8),執行主題,任務描述
+08:30,🏹 台股開盤預報,整理美股收盤概況、台指期變動及今日台股重大消息。
+15:30,📊 台股盤後總結,整理台股當日表現、盤後重大事件與關鍵個股新聞。
+21:30,⚡ 美股開盤前夕,聚焦美股盤前異動、聯準會(Fed)動態及全球總經數據。
+06:00,📈 美股收盤總結,整理美股當日走勢、S&P 500 表現與科技巨頭財報新聞。
 
-Discord 即時推播：支援 Webhook 功能，讓你在手機上就能掌握盤前/盤後的大事紀。
+🛠️ 技術架構說明 (Technical Stack)
+資料來源：yfinance (大盤即時數據)、Google News RSS (新聞源)。
 
-🛠️ 技術細節
-自動化工具: GitHub Actions。
+自動化引擎：GitHub Actions (Cron Schedule)。
+數據持久化：利用 Git Commit 將 sent_news.txt 狀態回傳至倉庫，實現免資料庫的快取管理。
+通知中心：Discord Webhook (Embed 格式化推播)。
 
-主要腳本: news_us_tw.py (負責爬取與整理新聞數據)。
+📂 檔案結構管理
+information-main/
+├── .github/workflows/
+│   └── daily_news.yml    # 自動化排程設定
+├── data/
+│   └── sent_news.txt     # (自動生成) 紀錄已發送過的新聞標題，防止重複
+├── news_us_tw.py         # 核心邏輯腳本：新聞抓取、去重與 Discord 發送
+└── requirements.txt      # 函式庫依賴：feedparser, requests, yfinance
 
-環境配置: 使用 python-version: '3.10' 環境運行。
-
-關鍵套件: requests, beautifulsoup4, yfinance。
-
-🚀 設定步驟
-1. 配置 Discord Webhook
-在你的 Discord 伺服器中建立 Webhook，並取得 URL。
-
-前往 GitHub 儲存庫的 Settings -> Secrets and variables -> Actions。
-
-新增一個 Secret，名稱為 DISCORD_WEBHOOK_URL，值為你的 Webhook 網址。
-
-2. 調整新聞觀察清單
-在 news_us_tw.py 中，你可以自定義 watch_list 變數，加入你感興趣的股票代號（例如 TSLA, 2454.TW）。
-
-3. 排程設定
-目前 GitHub Actions 設定為每日定時觸發 0 0 * * *（可依需求在 .github/workflows/daily_news.yml 中修改 cron 數值）。
-
-📋 報告範例
-🔔 今日美股重要新聞
-
-AAPL: Apple 宣布最新的 AI 發展計畫... [連結]
-
-NVDA: 輝達財報亮眼，盤後股價大漲... [連結]
-
-🔔 今日台股重要新聞
-
-2330.TW: 台積電法說會重點摘要... [連結]
-
-📂 檔案架構
-news_us_tw.py: 新聞爬蟲與格式化邏輯核心。
-
-.github/workflows/daily_news.yml: 定義自動化執行流程與環境變數注入。
+Disclaimer: 本系統提供之資訊僅供參考，不構成任何形式的投資建議。投資人應獨立判斷並自負投資風險。
