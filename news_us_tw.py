@@ -10,7 +10,7 @@ DISCORD_WEBHOOK_URL = os.getenv("NEWS_WEBHOOK_URL", "").strip()
 CACHE_FILE = "data/sent_news.txt"
 
 def get_market_price(market_type="TW"):
-    """獲取主要指數的即時點數 """
+    """獲取主要指數的即時行情摘要"""
     try:
         if market_type == "TW":
             # 台指期近月、加權指數
@@ -33,10 +33,9 @@ def get_market_price(market_type="TW"):
         return f"⚠️ 無法取得即時報價: {e}"
 
 def send_to_discord(label, posts, price_summary=""):
-    """發送包含行情摘要與新聞的 Discord 訊息 """
-    if not DISCORD_WEBHOOK_URL or not posts:
-        return
-
+    """將新聞與行情發送到 Discord"""
+    if not DISCORD_WEBHOOK_URL or not posts: return
+    
     embeds = []
     for post in posts:
         color = 3066993 if "台股" in label else 15258703
@@ -47,17 +46,16 @@ def send_to_discord(label, posts, price_summary=""):
             "color": color
         })
 
-    # 將行情摘要放在第一則訊息中
+    # 分批發送，行情摘要放在首則訊息
     for i in range(0, len(embeds), 10):
         payload = {
-            "username": "Smart News Radar",
             "content": f"## {label}\n{price_summary if i == 0 else ''}",
             "embeds": embeds[i:i+10]
         }
         requests.post(DISCORD_WEBHOOK_URL, json=payload)
 
 def get_market_news(market_type="TW"):
-    """抓取市場消息並過濾重複 """
+    """抓取新聞並過濾重複"""
     if not os.path.exists("data"): os.makedirs("data")
     
     sent_titles = set()
@@ -65,12 +63,11 @@ def get_market_news(market_type="TW"):
         with open(CACHE_FILE, "r", encoding="utf-8") as f:
             sent_titles = {line.strip() for line in f.readlines()}
 
-    # 獲取價格摘要
     price_summary = get_market_price(market_type)
-
+    
     if market_type == "TW":
         queries = ["台股 財經", "加權指數 走勢"]
-        label = "🏹 台股市場快訊"
+        label = "🏹 台股市場概況"
     else:
         queries = ["美股 盤前", "聯準會 利率", "S&P500 走勢"]
         label = "⚡ 美股即時情報"
@@ -97,7 +94,7 @@ def get_market_news(market_type="TW"):
 
     if new_posts:
         send_to_discord(label, new_posts, price_summary)
-        # 更新快取，保留最新 150 筆 
+        # 更新快取，保留最新 150 筆
         all_titles = list(sent_titles)[-150:]
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
             for t in all_titles: f.write(f"{t}\n")
@@ -106,7 +103,6 @@ if __name__ == "__main__":
     tz_tw = datetime.timezone(datetime.timedelta(hours=8))
     now = datetime.datetime.now(tz_tw)
     
-    # 根據時段決定市場 
     if 6 <= now.hour < 17:
         get_market_news("TW")
     else:
