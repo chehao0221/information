@@ -2,21 +2,32 @@ name: Stock News Notification
 
 on:
   schedule:
-    - cron: '30 00 * * 1-5' # 台北 08:30 (觸發台股邏輯)
-    - cron: '30 13 * * 1-5' # 台北 21:30 (觸發美股邏輯)
+    - cron: '30 00 * * 1-5' # 台北 08:30 (台股開盤前)
+    - cron: '30 07 * * 1-5' # 台北 15:30 (台股盤後)
+    - cron: '30 13 * * 1-5' # 台北 21:30 (美股開盤前) 🔥 新增
+    - cron: '00 22 * * 1-5' # 台北 06:00 (美股盤後)
   workflow_dispatch: 
 
 jobs:
   send_news:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # 必須開啟寫入權限才能存快取
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # 升級環境避免 yfinance 報錯
+          python-version: '3.10'
       - name: Install
         run: pip install feedparser requests yfinance
-      - name: Run
+      - name: Run News Script
         env:
           NEWS_WEBHOOK_URL: ${{ secrets.NEWS_WEBHOOK_URL }}
         run: python news_us_tw.py
+      - name: Save Cache
+        run: |
+          git config --local user.name "News-Bot"
+          git config --local user.email "actions@github.com"
+          git add data/sent_news.txt || true
+          git commit -m "Update news cache [skip ci]" || true
+          git push || true
