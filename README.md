@@ -1,35 +1,82 @@
-🏹 全球金融快訊雷達系統 (Smart News Radar)
-本系統是一個基於 GitHub Actions 與 Python 驅動的自動化金融情報中心。系統具備「跨市場監控」、「新聞去重快取」以及「關鍵時段推播」三大核心功能，旨在為投資者提供最即時、精確且不重複的台美股市場動態。
+🏹 全球金融快訊雷達系統（Smart News Radar）
 
-🌟 核心特性 (Core Features)
-完全解耦設計：獨立於 AI 預測倉庫運行，專注於市場總體經濟與大盤消息，確保單一節點故障不會影響整體運作。
-智能去重機制 (De-duplication)：內建持久化快取技術，自動記錄已推播的新聞標題，確保 Discord 頻道不會出現重複訊息。
-動態時段偵測：系統會自動根據台北時間判斷當前市場（台股或美股），並動態調整搜尋關鍵字。
-盤前預報功能：特別強化「台股開盤前」與「美股開盤前」的情報彙整，助您掌握第一手盤勢脈動。
+Smart News Radar 是一套基於 GitHub Actions + Python 的自動化金融資訊彙整系統，專注於 台股與美股市場的總體經濟與大盤新聞監控。
+系統以「穩定、去重、不中斷」為設計核心，提供即時且不重複的市場快訊推播。
 
-⏳ 自動化執行時間線 (Workflow Timeline)
-系統透過 GitHub Actions 每日於關鍵金融時刻自動執行：
+本專案為資訊彙整與推播工具，不涉及投資預測、交易決策或任何形式的投資建議。
 
-台北時間 (GMT+8),執行主題,任務描述
-08:30,🏹 台股開盤預報,整理美股收盤概況、台指期變動及今日台股重大消息。
-15:30,📊 台股盤後總結,整理台股當日表現、盤後重大事件與關鍵個股新聞。
-21:30,⚡ 美股開盤前夕,聚焦美股盤前異動、聯準會(Fed)動態及全球總經數據。
-06:00,📈 美股收盤總結,整理美股當日走勢、S&P 500 表現與科技巨頭財報新聞。
+🌟 核心特性（Core Features）
+✅ 跨市場監控（台股 / 美股）
 
-🛠️ 技術架構說明 (Technical Stack)
-資料來源：yfinance (大盤即時數據)、Google News RSS (新聞源)。
+自動依據台北時間（GMT+8）判斷當前市場時段
 
-自動化引擎：GitHub Actions (Cron Schedule)。
-數據持久化：利用 Git Commit 將 sent_news.txt 狀態回傳至倉庫，實現免資料庫的快取管理。
-通知中心：Discord Webhook (Embed 格式化推播)。
+動態切換台股與美股新聞來源與搜尋關鍵字
 
-📂 檔案結構管理
+避免跨市場資訊混發
+
+✅ 智能新聞去重機制（De-duplication）
+
+內建持久化快取（sent_news.txt）
+
+已推播過的新聞標題不會重複發送
+
+去重狀態透過 Git Commit 保存，無需資料庫
+
+✅ 關鍵時段推播
+
+支援盤前 / 盤中 / 盤後資訊彙整
+
+適合開盤前快速掌握市場氛圍
+
+避免無意義的高頻洗版推播
+
+✅ 完全解耦設計
+
+獨立於任何交易或 AI 預測系統
+
+單一節點故障不影響其他系統運作
+
+可安全長期自動執行
+
+⏳ 自動化執行時間線（Workflow Timeline）
+
+系統透過 GitHub Actions 於關鍵金融時刻自動執行：
+
+台北時間 (GMT+8)	主題	任務內容
+08:30	🏹 台股盤前情報	彙整美股收盤、台股盤前重要消息
+15:30	📊 台股盤後總結	台股當日表現與盤後重大事件
+21:30	⚡ 美股盤前情報	美股盤前異動、Fed 動態、總經數據
+06:00	📈 美股盤後總結	美股收盤概況與重要財經新聞
+🛠️ 技術架構（Technical Stack）
+
+資料來源
+
+Yahoo Finance (yfinance)：大盤即時數據
+
+Google News RSS：新聞資訊來源
+
+自動化引擎
+
+GitHub Actions（Cron Schedule）
+
+狀態管理
+
+Git Commit 持久化快取（免資料庫）
+
+通知管道
+
+Discord Webhook（Embed 格式化推播）
+
+📂 專案結構
 information-main/
 ├── .github/workflows/
-│   └── daily_news.yml    # 自動化排程設定
+│   └── daily_news.yml      # GitHub Actions 自動化排程
 ├── data/
-│   └── sent_news.txt     # (自動生成) 紀錄已發送過的新聞標題，防止重複
-├── news_us_tw.py         # 核心邏輯腳本：新聞抓取、去重與 Discord 發送
-└── requirements.txt      # 函式庫依賴：feedparser, requests, yfinance
+│   └── sent_news.txt       # 新聞去重快取（自動生成）
+├── news_us_tw.py           # 核心邏輯：新聞抓取 / 去重 / 推播
+└── requirements.txt        # 相依套件（feedparser, requests, yfinance）
 
-Disclaimer: 本系統提供之資訊僅供參考，不構成任何形式的投資建議。投資人應獨立判斷並自負投資風險。
+⚠️ Disclaimer
+
+本系統提供之資訊僅供參考，不構成任何形式的投資建議。
+投資人應自行判斷並承擔相關風險。
