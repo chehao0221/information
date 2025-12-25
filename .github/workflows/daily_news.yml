@@ -6,21 +6,22 @@ on:
     - cron: '30 07 * * *' # 台北 15:30 (台股盤後)
     - cron: '30 13 * * *' # 台北 21:30 (美股開盤前)
     - cron: '00 22 * * *' # 台北 06:00 (美股盤後)
-  workflow_dispatch:
+  workflow_dispatch: # 支援手動觸發測試
 
 jobs:
   send_news:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # 必須開啟寫入權限才能 Push 檔案回倉庫
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
         with:
-          # 取出完整的 commit 紀錄，確保 git push 順利
-          fetch-depth: 0
+          fetch-depth: 0 # 取得完整歷史紀錄，避免 Rebase 失敗
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -38,7 +39,6 @@ jobs:
       - name: Run News Script
         env:
           NEWS_WEBHOOK_URL: ${{ secrets.NEWS_WEBHOOK_URL }}
-          # 強制讓執行環境也處於台北時間（選用）
           TZ: Asia/Taipei
         run: python news_us_tw.py
 
@@ -46,13 +46,18 @@ jobs:
         run: |
           git config --local user.name "News-Bot"
           git config --local user.email "actions@github.com"
-          # 先同步遠端變更，防止多個 Action 同時執行時衝突
-          git pull --rebase origin main
+          
+          # 1. 先將變更加入暫存區
           git add data/sent_news.txt || true
-          # 只有在檔案真的有變動時才 commit
+          
+          # 2. 使用 autostash 進行 rebase
+          # 這能解決「本地有變更時無法 pull」的問題
+          git pull --rebase --autostash origin main
+          
+          # 3. 只有在檔案真的有變動時才 commit，避免產生無意義的紀錄
           if ! git diff --cached --quiet; then
             git commit -m "Update news cache [skip ci]"
             git push origin main
           else
-            echo "No changes in cache file. Skipping push."
+            echo "快取內容無變動，跳過推送。"
           fi
