@@ -1,4 +1,4 @@
-name: Daily News Push
+name: News Push
 
 on:
   schedule:
