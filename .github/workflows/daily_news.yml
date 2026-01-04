@@ -2,58 +2,38 @@ name: Stock News Notification
 
 on:
   schedule:
-    - cron: '30 00 * * *' # 台北 08:30
-    - cron: '30 07 * * *' # 台北 15:30
-    - cron: '30 13 * * *' # 台北 21:30
-    - cron: '00 22 * * *' # 台北 06:00
+    - cron: '30 00 * * 1-5' # 台北 08:30 (台股開盤前)
+    - cron: '30 07 * * 1-5' # 台北 15:30 (台股盤後)
+    - cron: '30 13 * * 1-5' # 台北 21:30 (美股開盤前)
+    - cron: '00 22 * * 1-5' # 台北 06:00 (美股盤後)
   workflow_dispatch:
 
 jobs:
   send_news:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-
+      contents: write # 必須開啟寫入權限才能存快取
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install Dependencies
-        run: pip install feedparser requests yfinance
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
       - name: Run News Script
         env:
           NEWS_WEBHOOK_URL: ${{ secrets.NEWS_WEBHOOK_URL }}
-          TZ: Asia/Taipei
         run: python news_us_tw.py
 
-      - name: Update Cache and Push
+      - name: Save Cache
         run: |
           git config --local user.name "News-Bot"
           git config --local user.email "actions@github.com"
-          
-          # 解決衝突的核心：先 add 再 pull rebase (搭配 autostash)
           git add data/sent_news.txt || true
-          git pull --rebase --autostash origin main
-          
-          if ! git diff --cached --quiet; then
-            git commit -m "Update news cache [skip ci]"
-            git push origin main
-          else
-            echo "No new news to cache."
-          fi
+          git commit -m "Update news cache [skip ci]" || true
+          git push || true
