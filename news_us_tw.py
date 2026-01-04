@@ -284,8 +284,6 @@ def _post_webhook(embeds: List[dict]) -> None:
         return
     payload = {
         "embeds": embeds,
-        # flags=4 會抑制一般 embed/unfurl（保險，不影響我們自己的 embeds）
-        "flags": 4,
     }
     r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=HTTP_TIMEOUT)
     if r.status_code >= 300:
