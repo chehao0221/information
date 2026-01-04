@@ -12,12 +12,12 @@ jobs:
   send_news:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 必須開啟寫入權限才能存快取
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
