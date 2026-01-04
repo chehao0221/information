@@ -1,304 +1,315 @@
 # -*- coding: utf-8 -*-
 """
-Information push bot (TW / US / Crypto) -> Discord
+Smart News Radar System - TW / US / Crypto market news push to Discord.
 
-重要：此版本把「顯示方式」恢復成你舊圖的風格：一則新聞一張 Embed 卡片，
-並依「重大/中級/一般」套用紅/黃/綠顏色。
-
-由於 Google News RSS 不提供完整欄位（來源/時間/摘要），本腳本用「可解釋」的方式補齊：
-- 新聞來源：固定顯示 Google News
-- 發布時間：以推播時間（台北）顯示
-- 市場判斷/利多利空：用標題關鍵字簡單分類（可自行調整 KEYWORDS_*）
+顯示方式（照你原本的截圖）：
+- 一則新聞 = 一張 Discord Embed 卡片
+- 重要性徽章：重大 / 中級 / 一般
+- 顏色：重大=紅、中級=黃、一般=綠
+- 每次執行：依時段推 台股 or 美股，再另外推 Crypto
+- 去重：data/sent_news.txt
 """
+from __future__ import annotations
 
-import datetime
 import os
-import re
-import urllib.parse
-from typing import Dict, List, Tuple
+import time
+import datetime as dt
+from typing import Dict, List, Tuple, Optional
+from urllib.parse import quote
 
-import feedparser
 import requests
+import feedparser
+import yfinance as yf
 
-# =========================
-# 基本設定
-# =========================
+# ----------------------------
+# Config
+# ----------------------------
 DISCORD_WEBHOOK_URL = os.getenv("NEWS_WEBHOOK_URL", "").strip()
-CACHE_FILE = "data/sent_news.txt"
+CACHE_FILE = os.path.join("data", "sent_news.txt")
 
-GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+TZ_TAIPEI = dt.timezone(dt.timedelta(hours=8))
 
-HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "12"))
-MAX_ITEMS_PER_MARKET = int(os.getenv("MAX_ITEMS_PER_MARKET", "8"))  # 每個市場最多幾則新聞
-# Discord 限制：一次 webhook 最多 10 embeds
-MAX_EMBEDS_PER_REQUEST = 10
+# Google News RSS
+RSS_TW = "https://news.google.com/rss/search?q={query}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+RSS_US = "https://news.google.com/rss/search?q={query}&hl=zh-TW&gl=US&ceid=US:zh-Hant"
+RSS_CRYPTO = "https://news.google.com/rss/search?q={query}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
 
-# =========================
-# 重要性分級（可自行微調）
-# =========================
-# 重大（紅）
-KEYWORDS_MAJOR = [
-    "暴跌", "崩盤", "熔斷", "緊急", "違約", "破產", "下調評級", "裁員", "制裁",
-    "升息", "降息", "利率決議", "FOMC", "CPI", "PCE", "NFP", "非農",
-    "地緣", "戰爭", "衝突", "停火", "封鎖",
-    "SEC", "訴訟", "判決", "調查",
-    "ETF核准", "ETF獲批", "駭客", "被盜", "黑客",
-]
-# 中級（黃）
-KEYWORDS_MEDIUM = [
-    "財報", "展望", "指引", "營收", "毛利", "EPS", "獲利", "下修", "上修",
-    "併購", "收購", "合作", "投資", "發表", "推出",
-    "美元", "美債", "殖利率", "通膨", "油價", "金價",
-    "比特幣", "以太坊", "BTC", "ETH", "加密", "幣圈",
-]
-# 一般（綠）= 其他
+# Queries (可自行調整)
+QUERY_TW = quote("台股 OR 加權指數 OR 櫃買 OR 台積電 OR 2330 OR 外資 OR 金管會 when:1d", safe="")
+QUERY_US = quote("美股 OR 那斯達克 OR 標普 OR 道瓊 OR Fed OR CPI OR 非農 when:1d", safe="")
+QUERY_CRYPTO = quote("比特幣 OR BTC OR 以太幣 OR ETH OR 加密貨幣 OR 幣圈 when:1d", safe="")
 
-COLOR_RED = 0xE74C3C
-COLOR_YELLOW = 0xF1C40F
-COLOR_GREEN = 0x2ECC71
+# Discord webhook: max 10 embeds per request
+MAX_EMBEDS_PER_REQ = 10
+MAX_NEWS_PER_MARKET = 9  # 每個市場最多發幾則（避免太多）
 
-FOOTER_TEXT = "Smart News Radar System"
+COLOR_MAP = {
+    "重大": 0xFF0000,  # 紅
+    "中級": 0xFFAA00,  # 黃/橘
+    "一般": 0x00FF00,  # 綠
+}
+HEADER_COLOR = 0x2F3136  # 深色 header
 
+# ----------------------------
+# Cache
+# ----------------------------
+def ensure_data_dir() -> None:
+    os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
 
-# =========================
-# 工具函式
-# =========================
-def _ensure_data_dir() -> None:
-    os.makedirs(os.path.dirname(CACHE_FILE) or ".", exist_ok=True)
-
-
-def _normalize_title(t: str) -> str:
-    t = (t or "").strip()
-    t = re.sub(r"\s+", " ", t)
-    return t
-
-
-def _load_sent_titles() -> List[str]:
+def load_cache() -> set[str]:
+    ensure_data_dir()
     if not os.path.exists(CACHE_FILE):
-        return []
+        return set()
     with open(CACHE_FILE, "r", encoding="utf-8") as f:
-        return [line.strip() for line in f if line.strip()]
+        return set(line.strip() for line in f if line.strip())
 
-
-def _save_sent_titles(titles: List[str]) -> None:
-    # 去重 + 控制大小（保留最新 1500 筆）
-    seen = set()
-    out: List[str] = []
-    for t in titles:
-        nt = _normalize_title(t)
-        if not nt or nt in seen:
-            continue
-        seen.add(nt)
-        out.append(nt)
-    out = out[:1500]
+def save_cache(items: set[str]) -> None:
+    ensure_data_dir()
+    # 避免檔案無限長：只保留最後 5000 筆
+    lines = list(items)
+    if len(lines) > 5000:
+        lines = lines[-5000:]
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(out) + ("\n" if out else ""))
+        for x in lines:
+            f.write(x + "\n")
 
+# ----------------------------
+# Parsing & Scoring
+# ----------------------------
+def pick_site_from_title(title: str) -> Tuple[str, str]:
+    # Google News 常見格式： "標題 - 來源站"
+    if " - " in title:
+        a, b = title.rsplit(" - ", 1)
+        return a.strip(), b.strip()
+    return title.strip(), "Google News"
 
-def _fetch_google_news(query: str) -> List[Dict[str, str]]:
-    q = urllib.parse.quote_plus(query)
-    url = GOOGLE_NEWS_RSS.format(query=q)
-    feed = feedparser.parse(url)
-    posts: List[Dict[str, str]] = []
-    for e in (feed.entries or []):
-        title = (e.get("title") or "").strip()
-        link = (e.get("link") or "").strip()
-        if not title or not link:
-            continue
-        posts.append({"title": title, "link": link})
-    return posts
+def safe_get_published(entry) -> Optional[str]:
+    if getattr(entry, "published", None):
+        return str(entry.published)
+    if getattr(entry, "updated", None):
+        return str(entry.updated)
+    return None
 
+def severity_from_text(text: str) -> str:
+    t = text.lower()
 
-def _dedupe(posts: List[Dict[str, str]], sent_titles: List[str]) -> List[Dict[str, str]]:
-    sent = set(_normalize_title(t) for t in sent_titles)
-    out: List[Dict[str, str]] = []
-    for p in posts:
-        nt = _normalize_title(p.get("title", ""))
-        if not nt or nt in sent:
-            continue
-        out.append(p)
-    return out
-
-
-def _classify_level(title: str) -> Tuple[str, int]:
-    """回傳 (等級字串, embed_color)"""
-    t = title or ""
-    for kw in KEYWORDS_MAJOR:
-        if kw and kw in t:
-            return "重大", COLOR_RED
-    for kw in KEYWORDS_MEDIUM:
-        if kw and kw in t:
-            return "中級", COLOR_YELLOW
-    return "一般", COLOR_GREEN
-
-
-def _extract_ticker_hint(title: str) -> str:
-    """
-    嘗試從標題抓出類似：
-    - 2330.TW
-    - TSLA, AAPL
-    - BTC, ETH
-    回傳用於卡片標題前綴，抓不到就回空字串。
-    """
-    if not title:
-        return ""
-    m = re.search(r"\b(\d{4}\.TW)\b", title)
-    if m:
-        return m.group(1)
-    m = re.search(r"\b([A-Z]{2,6})\b", title)
-    if m and m.group(1) not in {"OR", "AND", "THE"}:
-        return m.group(1)
-    return ""
-
-
-def _build_header_embed(market_title: str, taipei_now: datetime.datetime) -> Dict:
-    return {
-        "title": market_title,
-        "description": taipei_now.strftime("%Y-%m-%d %H:%M（台北）"),
-        "color": 0x95A5A6,  # 灰色做總標題
-        "footer": {"text": FOOTER_TEXT},
-    }
-
-
-def _build_news_embed(market: str, post: Dict[str, str], taipei_now: datetime.datetime) -> Dict:
-    title = post["title"]
-    url = post["link"]
-    level, color = _classify_level(title)
-
-    ticker = _extract_ticker_hint(title)
-    card_title = f"{ticker} | {title}" if ticker else title
-    if len(card_title) > 256:
-        card_title = card_title[:253] + "..."
-
-    fields = [
-        {"name": "🏷️ 等級", "value": level, "inline": True},
-        {"name": "📌 市場", "value": market, "inline": True},
-        {"name": "📰 新聞來源", "value": "Google News", "inline": True},
-        {"name": "🕒 發布時間", "value": taipei_now.strftime("%H:%M（台北）"), "inline": True},
+    major_kw = [
+        "崩盤","暴跌","熔斷","破產","違約","倒閉","擠兌","爆雷","清算",
+        "駭客","hack","漏洞","資安","凍結","詐騙",
+        "急升","暴漲","飆升","破紀錄","歷史新高",
+        "升息","降息","cpi","非農","fed","fomc","利率決議",
+        "監管","訴訟","sec","禁令","制裁",
+    ]
+    mid_kw = [
+        "大跌","大漲","回檔","反彈","下修","上修","財報","展望","預測","裁員",
+        "通膨","景氣","衰退","增長","美元","債券","殖利率","匯率",
+        "機會","看好","看壞","利多","利空",
     ]
 
-    # 你舊圖有「市場判斷 / 利多」等欄位：這裡用簡單可調的規則填入
-    # （之後你要完全對齊舊倉庫的規則，可以把舊倉庫那段分類/打分邏輯貼過來，我再直接搬）
-    bias = "利多" if level in ("重大", "中級") else "一般"
-    judge = "市場波動" if level == "重大" else ("關注事件" if level == "中級" else "例行更新")
-    fields.extend(
-        [
-            {"name": "⚖️ 市場判斷", "value": judge, "inline": True},
-            {"name": "📈 利多/利空", "value": bias, "inline": True},
-        ]
-    )
+    score = 0
+    for kw in major_kw:
+        if kw in t:
+            score += 3
+    for kw in mid_kw:
+        if kw in t:
+            score += 1
 
-    return {
-        "title": card_title,
-        "url": url,
+    if score >= 3:
+        return "重大"
+    if score >= 1:
+        return "中級"
+    return "一般"
+
+def sentiment_from_text(text: str) -> Tuple[str, str]:
+    t = text.lower()
+    bull = ["大漲","暴漲","飆升","反彈","利多","看好","上修","創新高","突破"]
+    bear = ["大跌","暴跌","崩盤","回檔","利空","看壞","下修","衰退","跌破"]
+    bull_hit = any(k in t for k in bull)
+    bear_hit = any(k in t for k in bear)
+    if bull_hit and not bear_hit:
+        return "利多", "偏多"
+    if bear_hit and not bull_hit:
+        return "利空", "偏空"
+    return "中性", "觀望"
+
+def fetch_rss(url: str, timeout: int = 15) -> List[Dict]:
+    resp = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+    resp.raise_for_status()
+    feed = feedparser.parse(resp.content)
+
+    posts: List[Dict] = []
+    for e in feed.entries:
+        raw_title = getattr(e, "title", "").strip()
+        if not raw_title:
+            continue
+        clean_title, source = pick_site_from_title(raw_title)
+        link = getattr(e, "link", "").strip()
+        published = safe_get_published(e)
+
+        key = link or clean_title  # 用 link 優先去重
+        level = severity_from_text(clean_title + " " + (source or ""))
+
+        posts.append({
+            "key": key,
+            "title": clean_title,
+            "link": link,
+            "source": source,
+            "published": published,
+            "level": level,
+        })
+    return posts
+
+# ----------------------------
+# Market snapshot (header)
+# ----------------------------
+def get_index_snapshot(market: str) -> str:
+    try:
+        if market == "TW":
+            ticker, label = "^TWII", "加權指數"
+        elif market == "US":
+            ticker, label = "^IXIC", "那斯達克"
+        else:
+            ticker, label = "BTC-USD", "BTC"
+
+        tk = yf.Ticker(ticker)
+        fi = getattr(tk, "fast_info", None)
+        price = prev = None
+        if fi:
+            price = fi.get("last_price") or fi.get("last")
+            prev = fi.get("previous_close")
+        if price is None or prev is None:
+            hist = tk.history(period="2d")
+            if len(hist) >= 2:
+                price = float(hist["Close"].iloc[-1])
+                prev = float(hist["Close"].iloc[-2])
+        if price is None or prev is None or prev == 0:
+            return ""
+        pct = ((price - prev) / prev) * 100.0
+        sign = "+" if pct >= 0 else ""
+        return f"{label}: {price:.2f} ({sign}{pct:.2f}%)"
+    except Exception:
+        return ""
+
+# ----------------------------
+# Embed builders (照你原本卡片風格)
+# ----------------------------
+def _build_header_embed(title: str, now: dt.datetime, index_line: str) -> Dict:
+    desc = f"{now.strftime('%Y-%m-%d %H:%M')}"
+    if index_line:
+        desc += f"\n📈 {index_line}"
+    return {"title": title, "description": desc, "color": HEADER_COLOR}
+
+def _build_news_embed(market_label: str, post: Dict, now: dt.datetime) -> Dict:
+    title = post.get("title", "無標題")
+    link = post.get("link", "")
+    level = post.get("level", "一般")
+    color = COLOR_MAP.get(level, COLOR_MAP["一般"])
+
+    tag, judge = sentiment_from_text(title)
+
+    fields = [
+        {"name": "🏷️ 重要程度", "value": level, "inline": True},
+        {"name": "⚖️ 市場判斷", "value": judge, "inline": True},
+        {"name": "📈 訊號", "value": tag, "inline": True},
+        {"name": "📰 新聞來源", "value": post.get("source", "Google News"), "inline": True},
+    ]
+
+    pub = post.get("published")
+    if pub:
+        fields.append({"name": "🕒 發布時間", "value": str(pub)[:40], "inline": True})
+    else:
+        fields.append({"name": "🕒 推播時間", "value": now.strftime("%H:%M (台北)"), "inline": True})
+
+    embed: Dict = {
+        "title": f"{market_label}｜{title}",
         "color": color,
         "fields": fields,
-        "footer": {"text": FOOTER_TEXT},
+        "footer": {"text": "Smart News Radar System"},
     }
+    if link:
+        embed["url"] = link
+    return embed
 
-
-def _post_webhook(payload: Dict) -> None:
+# ----------------------------
+# Discord sending
+# ----------------------------
+def post_webhook(payload: Dict) -> None:
     if not DISCORD_WEBHOOK_URL:
-        print("⚠️ NEWS_WEBHOOK_URL 未設定，跳過推播。")
-        return
-    r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=HTTP_TIMEOUT)
+        raise RuntimeError("缺少 NEWS_WEBHOOK_URL（GitHub Secrets / env）")
+    r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=20)
     if r.status_code >= 300:
-        raise RuntimeError(f"Discord webhook failed: {r.status_code} {r.text[:500]}")
-
+        raise RuntimeError(f"Discord webhook failed: {r.status_code} {r.text[:800]}")
 
 def send_embeds_in_batches(embeds: List[Dict]) -> None:
-    """
-    Discord webhook：一次最多 10 embeds
-    """
-    if not embeds:
-        return
-    batch: List[Dict] = []
-    for e in embeds:
-        batch.append(e)
-        if len(batch) >= MAX_EMBEDS_PER_REQUEST:
-            _post_webhook({"embeds": batch})
-            batch = []
-    if batch:
-        _post_webhook({"embeds": batch})
+    for i in range(0, len(embeds), MAX_EMBEDS_PER_REQ):
+        batch = embeds[i:i + MAX_EMBEDS_PER_REQ]
+        post_webhook({"embeds": batch})
+        time.sleep(0.6)
 
+# ----------------------------
+# Main logic
+# ----------------------------
+def build_market_embeds(market: str, now: dt.datetime, cache: set[str]) -> Tuple[List[Dict], set[str]]:
+    if market == "TW":
+        header_title = "🏹 台股市場快訊"
+        rss_url = RSS_TW.format(query=QUERY_TW)
+        index_line = get_index_snapshot("TW")
+        market_label = "台股"
+    elif market == "US":
+        header_title = "⚡ 美股市場快訊"
+        rss_url = RSS_US.format(query=QUERY_US)
+        index_line = get_index_snapshot("US")
+        market_label = "美股"
+    else:
+        header_title = "🪙 Crypto 市場快訊"
+        rss_url = RSS_CRYPTO.format(query=QUERY_CRYPTO)
+        index_line = get_index_snapshot("CRYPTO")
+        market_label = "Crypto"
 
-# =========================
-# 主流程
-# =========================
-def run_push(label: str) -> None:
-    """
-    以「台股 / 美股 / Crypto」為主。
-    顯示方式：每個市場先送一張總標題卡，再「每則新聞一張卡」。
-    """
-    _ensure_data_dir()
-    sent_titles = _load_sent_titles()
-
-    # 主要關鍵字（你可以之後再自行微調）
-    tw_query = "台股 OR 台灣 股市 OR 加權指數 OR 台指期 OR 台積電"
-    us_query = "美股 OR 美國 股市 OR 道瓊 OR 那斯達克 OR 標普500 OR 聯準會 OR Fed"
-    crypto_query = "比特幣 OR 以太坊 OR 加密貨幣 OR Bitcoin OR Ethereum"
-
-    tw_posts = _dedupe(_fetch_google_news(tw_query), sent_titles)[:MAX_ITEMS_PER_MARKET]
-    us_posts = _dedupe(_fetch_google_news(us_query), sent_titles)[:MAX_ITEMS_PER_MARKET]
-    crypto_posts = _dedupe(_fetch_google_news(crypto_query), sent_titles)[:MAX_ITEMS_PER_MARKET]
-
-    if not (tw_posts or us_posts or crypto_posts):
-        print("✅ 無新內容（可能都已推播過），跳過。")
-        return
-
-    taipei_tz = datetime.timezone(datetime.timedelta(hours=8))
-    now = datetime.datetime.now(taipei_tz)
+    posts = fetch_rss(rss_url)
+    new_posts = [p for p in posts if p["key"] not in cache][:MAX_NEWS_PER_MARKET]
 
     embeds: List[Dict] = []
+    embeds.append(_build_header_embed(header_title, now, index_line))
 
-    if tw_posts:
-        embeds.append(_build_header_embed("🏹 台股市場快訊", now))
-        embeds.extend([_build_news_embed("台股", p, now) for p in tw_posts])
+    if not new_posts:
+        embeds.append({
+            "title": f"{market_label}｜本次沒有新的更新",
+            "description": "（已依 sent_news.txt 去重）",
+            "color": COLOR_MAP["一般"],
+            "footer": {"text": "Smart News Radar System"},
+        })
+        return embeds, cache
 
-    if us_posts:
-        embeds.append(_build_header_embed("⚡ 美股市場快訊", now))
-        embeds.extend([_build_news_embed("美股", p, now) for p in us_posts])
+    for p in new_posts:
+        embeds.append(_build_news_embed(market_label, p, now))
+        cache.add(p["key"])
 
-    if crypto_posts:
-        embeds.append(_build_header_embed("🪙 Crypto 市場快訊", now))
-        embeds.extend([_build_news_embed("Crypto", p, now) for p in crypto_posts])
+    return embeds, cache
 
-    # 送出（分批）
-    send_embeds_in_batches(embeds)
+def main() -> None:
+    now = dt.datetime.now(TZ_TAIPEI)
+    cache = load_cache()
 
-    # 更新快取：把本次新推播的 title 加入（放前面，避免重複）
-    new_titles = [p["title"] for p in (tw_posts + us_posts + crypto_posts)]
-    _save_sent_titles(new_titles + sent_titles)
+    # 依你原本的時段邏輯：白天推台股、晚上推美股
+    is_tw_hours = (8 <= now.hour < 17)
 
+    embeds_all: List[Dict] = []
+    if is_tw_hours:
+        tw_embeds, cache = build_market_embeds("TW", now, cache)
+        embeds_all.extend(tw_embeds)
+    else:
+        us_embeds, cache = build_market_embeds("US", now, cache)
+        embeds_all.extend(us_embeds)
 
-def _label_by_time(taipei_now: datetime.datetime) -> str:
-    """
-    保留你原本的時段標籤（workflow 只是用這個做標題/辨識）
-    """
-    h = taipei_now.hour
-    m = taipei_now.minute
+    # Crypto 每次都推（你說以台股/美股/Crypto為主）
+    crypto_embeds, cache = build_market_embeds("CRYPTO", now, cache)
+    embeds_all.extend(crypto_embeds)
 
-    # 08:30 左右
-    if h == 8 and 0 <= m <= 59:
-        return "🏹 台股市場快訊"
-    # 13:30 左右
-    if h == 13 and 0 <= m <= 59:
-        return "🏹 台股午盤快訊"
-    # 21:30 左右
-    if h == 21 and 0 <= m <= 59:
-        return "⚡ 美股盤前快訊"
-    # 06:00 左右
-    if h == 6 and 0 <= m <= 59:
-        return "🌙 美股盤後回顧"
+    send_embeds_in_batches(embeds_all)
+    save_cache(cache)
 
-    # fallback：手動觸發或不在排程時段
-    if 8 <= h < 17:
-        return "🏹 台股快訊"
-    return "⚡ 美股快訊"
-
+    print(f"✅ Sent embeds: {len(embeds_all)} | Cache size: {len(cache)}")
 
 if __name__ == "__main__":
-    taipei_tz = datetime.timezone(datetime.timedelta(hours=8))
-    now = datetime.datetime.now(taipei_tz)
-    label = _label_by_time(now)
-    run_push(label)
+    main()
