@@ -98,7 +98,7 @@ def _build_section_lines(posts: List[Dict[str, str]], limit: int) -> str:
     for p in posts[:limit]:
         title = p["title"]
         link = p["link"]
-        lines.append(f"• [{title}]({link})")
+        lines.append(f"• {title} <{link}>")
     text = "\n".join(lines)
     return text[:3900]  # 留 buffer
 
@@ -166,7 +166,7 @@ def send_to_discord(title: str, sections: List[Dict[str, str]]) -> None:
 
     # Send chunks sequentially
     for i, chunk in enumerate(chunks, start=1):
-        payload = {"content": chunk}
+        payload = {"content": chunk, "flags": 4}  # suppress embeds
         try:
             r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=HTTP_TIMEOUT)
         except Exception as e:
