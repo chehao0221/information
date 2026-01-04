@@ -105,25 +105,85 @@ def _build_section_lines(posts: List[Dict[str, str]], limit: int) -> str:
 
 def send_to_discord(title: str, sections: List[Dict[str, str]]) -> None:
     """
-    sections: [{"name": "台股", "content": "...."}, ...]
+    Send to Discord via webhook.
+    Discord limits (rough):
+      - embed.description: 4096 chars
+      - embeds per message: 10
+    sections: [{"name": "台股", "content": "..."} , ...]
     """
     if not DISCORD_WEBHOOK_URL:
         print("⚠️ NEWS_WEBHOOK_URL 未設定，跳過推播。")
         return
 
-    embeds = [
-        {
-            "title": title,
-            "description": "\n".join([f"**{s['name']}**\n{s['content']}" for s in sections if s.get("content")]),
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+    # Build blocks in the same display style: **區塊名** + 內容（多行）
+    blocks: List[str] = []
+    for s in sections:
+        name = (s.get("name") or "").strip()
+        content = (s.get("content") or "").strip()
+        if not content:
+            continue
+        if name:
+            blocks.append(f"**{name}**\n{content}")
+        else:
+            blocks.append(content)
+
+    combined = "\n\n".join(blocks).strip()
+    if not combined:
+        combined = "（本次沒有新的更新）"
+
+    # Split into chunks that fit embed.description
+    max_desc = 3900  # leave headroom for safety
+    lines = combined.splitlines()
+    chunks: List[str] = []
+    buf: List[str] = []
+    size = 0
+    for line in lines:
+        # +1 for newline
+        add = len(line) + (1 if buf else 0)
+        if size + add > max_desc:
+            chunks.append("\n".join(buf).strip())
+            buf = [line]
+            size = len(line)
+        else:
+            if buf:
+                buf.append(line)
+                size += len(line) + 1
+            else:
+                buf = [line]
+                size = len(line)
+    if buf:
+        chunks.append("\n".join(buf).strip())
+
+    # Discord max 10 embeds per message. If more, merge overflow into the last embed (truncate).
+    if len(chunks) > 10:
+        head = chunks[:9]
+        tail = "\n\n".join(chunks[9:])
+        tail = tail[:max_desc]
+        chunks = head + [tail]
+
+    embeds = []
+    now = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    for i, desc in enumerate(chunks):
+        emb = {
+            "description": desc or "（空白）",
+            "timestamp": now,
         }
-    ]
+        if i == 0:
+            emb["title"] = (title or "News")[:256]
+        embeds.append(emb)
 
     payload = {"embeds": embeds}
-    r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=HTTP_TIMEOUT)
-    if r.status_code >= 300:
-        raise RuntimeError(f"Discord webhook failed: {r.status_code} {r.text[:500]}")
 
+    try:
+        r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=HTTP_TIMEOUT)
+    except Exception as e:
+        print(f"❌ Discord webhook request error: {e}")
+        return
+
+    if r.status_code >= 300:
+        # Don't hard-fail the whole workflow; log details for debugging.
+        print(f"❌ Discord webhook failed: {r.status_code} {r.text[:500]}")
+        return
 
 def run_push(label: str) -> None:
     """
