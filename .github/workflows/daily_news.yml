@@ -5,9 +5,13 @@ on:
     - cron: "*/30 * * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -17,7 +21,13 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - run: python news_us_tw.py
+      # ✅ 強制把 Repo Secrets 注入到這個 step
+      - name: Run news push
+        env:
+          NEWS_WEBHOOK_TW: ${{ secrets.NEWS_WEBHOOK_TW }}
+          NEWS_WEBHOOK_US: ${{ secrets.NEWS_WEBHOOK_US }}
+          NEWS_WEBHOOK_CRYPTO: ${{ secrets.NEWS_WEBHOOK_CRYPTO }}
+        run: python news_us_tw.py
 
       - name: Commit cache
         run: |
