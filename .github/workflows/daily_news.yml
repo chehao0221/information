@@ -2,7 +2,10 @@ name: News Push
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    # 早上 8:00 到 晚上 10:30 之間執行（每 90 分鐘一次）
+    # 分別在 0、30 分執行，並過濾掉 23:00-07:59 的時段
+    - cron: "0 8,11,14,17,20,23 * * *"   # 8點, 11點, 14點, 17點, 20點, 23點整
+    - cron: "30 9,12,15,18,21 * * *"    # 9:30, 12:30, 15:30, 18:30, 21:30
   workflow_dispatch:
 
 permissions:
@@ -13,26 +16,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - [cite_start]uses: actions/checkout@v4 [cite: 1]
 
-      - uses: actions/setup-python@v5
+      - [cite_start]uses: actions/setup-python@v5 [cite: 1]
         with:
-          python-version: "3.11"
+          [cite_start]python-version: "3.11" [cite: 1]
 
-      - run: pip install -r requirements.txt
+      - [cite_start]run: pip install -r requirements.txt [cite: 1]
 
-      # ✅ 強制把 Repo Secrets 注入到這個 step
       - name: Run news push
         env:
-          NEWS_WEBHOOK_TW: ${{ secrets.NEWS_WEBHOOK_TW }}
-          NEWS_WEBHOOK_US: ${{ secrets.NEWS_WEBHOOK_US }}
-          NEWS_WEBHOOK_CRYPTO: ${{ secrets.NEWS_WEBHOOK_CRYPTO }}
-        run: python news_us_tw.py
+          [cite_start]NEWS_WEBHOOK_TW: ${{ secrets.NEWS_WEBHOOK_TW }} [cite: 2]
+          [cite_start]NEWS_WEBHOOK_US: ${{ secrets.NEWS_WEBHOOK_US }} [cite: 2]
+          [cite_start]NEWS_WEBHOOK_CRYPTO: ${{ secrets.NEWS_WEBHOOK_CRYPTO }} [cite: 2]
+        [cite_start]run: python news_us_tw.py [cite: 2]
 
       - name: Commit cache
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add data/sent_news.txt
-          git commit -m "update sent news" || true
-          git push || true
+          git config user.name "github-actions" [cite: 3]
+          git config user.email "actions@github.com" [cite: 3]
+          git add data/sent_news.txt [cite: 3]
+          git commit -m "update sent news" || true [cite: 3, 4]
+          git push || true [cite: 4]
