@@ -2,20 +2,20 @@ name: News Push
 
 on:
   schedule:
-    # 這裡的小時已經換算成 UTC (台灣時間 - 8)
-    # 台灣 08:00, 11:00, 14:00, 17:00, 20:00, 23:00 -> UTC 00, 03, 06, 09, 12, 15
+    # 這裡的小時已經換算成 UTC (台灣時間 - 8 小時)
+    # 台灣時間 08:00, 11:00, 14:00, 17:00, 20:00, 23:00 -> 對應 UTC 00, 03, 06, 09, 12, 15
     - cron: "0 0,3,6,9,12,15 * * *"
     
-    # 台灣 09:30, 12:30, 15:30, 18:30, 21:30 -> UTC 01, 04, 07, 10, 13
+    # 台灣時間 09:30, 12:30, 15:30, 18:30, 21:30 -> 對應 UTC 01, 04, 07, 10, 13
     - cron: "30 1,4,7,10,13 * * *"
   workflow_dispatch:
 
 permissions:
-  [cite_start]contents: write [cite: 1]
+  contents: write
 
 jobs:
   run:
-    [cite_start]runs-on: ubuntu-latest [cite: 1]
+    runs-on: ubuntu-latest
 
     steps:
       - [cite_start]uses: actions/checkout@v4 [cite: 1]
