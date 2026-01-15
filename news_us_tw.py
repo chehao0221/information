@@ -34,6 +34,13 @@ COLOR_MAP = {
     "一般": 0x00FF00,
 }
 
+# Discord Embed limits (https://discord.com/developers/docs/resources/channel#embed-object-embed-limits)
+_EMBED_TITLE_MAX = 256
+_EMBED_DESC_MAX = 4096
+_EMBED_FIELD_NAME_MAX = 256
+_EMBED_FIELD_VALUE_MAX = 1024
+_EMBED_COUNT_MAX_PER_MESSAGE = 10
+
 # ======================
 # 工具函式
 # ======================
@@ -64,32 +71,72 @@ def judge_level(title: str) -> str:
         return "中級"
     return "一般"
 
+
+def _clean_text(s: str) -> str:
+    """Remove control chars that Discord may reject."""
+    if not s:
+        return ""
+    # keep common whitespace; drop other C0 controls
+    return "".join(ch for ch in str(s) if (ch == "\n" or ch == "\t" or ord(ch) >= 32))
+
+
+def _truncate(s: str, max_len: int) -> str:
+    s = _clean_text(s).strip()
+    if len(s) <= max_len:
+        return s
+    # Use a single unicode ellipsis; keep within max_len
+    return s[: max(0, max_len - 1)].rstrip() + "…"
+
+
+def _safe_url(url: str) -> str:
+    url = _clean_text(url).strip()
+    # Discord requires either http(s) or omission
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return ""
+    # practical safety cap
+    return url[:2048]
+
 # ======================
 # Embed 建立（關鍵）
 # ======================
 def build_header_embed(title: str) -> Dict:
     return {
-        "title": f"📊 {title}",
-        "description": f"更新時間：{NOW.strftime('%Y-%m-%d %H:%M')}",
+        "title": _truncate(f"📊 {title}", _EMBED_TITLE_MAX),
+        "description": _truncate(
+            f"更新時間：{NOW.strftime('%Y-%m-%d %H:%M')}", _EMBED_DESC_MAX
+        ),
         "color": 0x2F3136,
     }
 
 def build_news_embed(market: str, title: str, link: str, level: str) -> Optional[Dict]:
-    title = title.strip()
-    link = link.strip()
+    title = _clean_text(title).strip()
+    link = _safe_url(link)
 
     # ❗最重要的防呆：沒有標題或連結，直接丟棄
     if not title or not link:
         return None
 
+    embed_title = _truncate(f"[{market}] {title}", _EMBED_TITLE_MAX)
     return {
-        "title": f"[{market}] {title}",
+        "title": embed_title,
         "url": link,
         "color": COLOR_MAP.get(level, 0x00FF00),
         "fields": [
-            {"name": "重要程度", "value": level, "inline": True},
-            {"name": "來源", "value": "Google News", "inline": True},
-            {"name": "時間", "value": NOW.strftime("%H:%M"), "inline": True},
+            {
+                "name": _truncate("重要程度", _EMBED_FIELD_NAME_MAX),
+                "value": _truncate(level, _EMBED_FIELD_VALUE_MAX),
+                "inline": True,
+            },
+            {
+                "name": _truncate("來源", _EMBED_FIELD_NAME_MAX),
+                "value": _truncate("Google News", _EMBED_FIELD_VALUE_MAX),
+                "inline": True,
+            },
+            {
+                "name": _truncate("時間", _EMBED_FIELD_NAME_MAX),
+                "value": _truncate(NOW.strftime("%H:%M"), _EMBED_FIELD_VALUE_MAX),
+                "inline": True,
+            },
         ],
         "footer": {"text": "Smart News Radar System"},
     }
@@ -102,13 +149,28 @@ def send_embeds(webhook: str, embeds: List[Dict]):
         return
 
     # Discord 限制：一次最多 10 個 embeds
-    for i in range(0, len(embeds), 10):
-        payload = {"embeds": embeds[i : i + 10]}
+    for i in range(0, len(embeds), _EMBED_COUNT_MAX_PER_MESSAGE):
+        batch = embeds[i : i + _EMBED_COUNT_MAX_PER_MESSAGE]
+        payload = {"embeds": batch}
         r = requests.post(webhook, json=payload, timeout=10)
-        if r.status_code >= 300:
-            raise RuntimeError(
-                f"Discord webhook failed: {r.status_code} {r.text[:300]}"
-            )
+        if r.status_code < 300:
+            continue
+
+        # 如果某個 embed 壞掉，Discord 會回 400 embeds:["N"]。
+        # 為了避免整個 job 失敗，改成逐條送並略過壞的那一條。
+        if r.status_code == 400:
+            bad_count = 0
+            for idx, one in enumerate(batch):
+                rr = requests.post(webhook, json={"embeds": [one]}, timeout=10)
+                if rr.status_code >= 300:
+                    bad_count += 1
+                    print(
+                        f"⚠️ skip bad embed (batch_index={i}, idx={idx}): {rr.status_code} {rr.text[:200]}"
+                    )
+            if bad_count > 0:
+                continue
+
+        raise RuntimeError(f"Discord webhook failed: {r.status_code} {r.text[:300]}")
 
 # ======================
 # 主流程（單一市場）
